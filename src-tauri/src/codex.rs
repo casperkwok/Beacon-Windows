@@ -50,7 +50,14 @@ fn asset_name() -> Option<&'static str> {
 }
 
 fn version_of(path: &str) -> Option<String> {
-    let out = std::process::Command::new(path).arg("--version").output().ok()?;
+    let mut cmd = std::process::Command::new(path);
+    cmd.arg("--version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd.output().ok()?;
     if !out.status.success() {
         return None;
     }

@@ -52,6 +52,12 @@ pub fn appserver_spawn(
     for (k, v) in std::env::vars() {
         cmd.env(k, v);
     }
+    // Suppress the console window that Windows would otherwise pop up.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
     let stdin = child.stdin.take().ok_or("no stdin")?;
