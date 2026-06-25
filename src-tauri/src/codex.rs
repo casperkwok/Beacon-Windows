@@ -10,6 +10,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 const RELEASE_BASE: &str = "https://github.com/openai/codex/releases/latest/download";
+// China-friendly GitHub accelerators, tried before the direct GitHub URL.
+const MIRRORS: &[&str] = &["https://ghfast.top/", "https://gh-proxy.com/"];
 
 fn beacon_bin_dir() -> PathBuf {
     // Windows: %LOCALAPPDATA%\Beacon\bin ; macOS: ~/Library/Application Support/Beacon/bin
@@ -110,7 +112,7 @@ struct Progress {
 #[tauri::command]
 pub async fn codex_install(app: AppHandle) -> Result<String, String> {
     let asset = asset_name().ok_or("当前系统/架构暂不支持自动安装 codex")?;
-    let url = format!("{RELEASE_BASE}/{asset}");
+    let gh = format!("{RELEASE_BASE}/{asset}");
     let dir = beacon_bin_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let dest = managed_path();
@@ -119,10 +121,23 @@ pub async fn codex_install(app: AppHandle) -> Result<String, String> {
         .user_agent("Beacon")
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("下载失败 HTTP {}", resp.status()));
+
+    // Try China mirrors first, then direct GitHub.
+    let mut candidates: Vec<String> = MIRRORS.iter().map(|m| format!("{m}{gh}")).collect();
+    candidates.push(gh.clone());
+    let mut resp = None;
+    let mut last_err = String::from("无可用下载源");
+    for url in &candidates {
+        match client.get(url).send().await {
+            Ok(r) if r.status().is_success() => {
+                resp = Some(r);
+                break;
+            }
+            Ok(r) => last_err = format!("HTTP {}", r.status()),
+            Err(e) => last_err = e.to_string(),
+        }
     }
+    let resp = resp.ok_or(format!("下载失败：{last_err}"))?;
     let total = resp.content_length().unwrap_or(0);
 
     // Stream to memory with progress (binaries are ~20-40MB).
